@@ -1,0 +1,29 @@
+# Build files
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+*.o
+*.obj
+*.so
+*.a
+*.exe
+*.out
+
+# Pistache generated files
+pistache_generated/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+.env
+.env.local
