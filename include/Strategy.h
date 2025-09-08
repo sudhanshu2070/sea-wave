@@ -1,6 +1,4 @@
-// Strategy.h
-// Updated with logging for trade openings, closings, and durations
-#ifndef STRATEGY_H
+ #ifndef STRATEGY_H
 #define STRATEGY_H
 
 #include <vector>
@@ -24,6 +22,7 @@ public:
         RenkoBuilder renko(brick_size);
         renko.buildFromOHLC(ohlc_data);
         auto renko_bars = renko.getRenkoBars();
+        std::cout << "Generated " << renko_bars.size() << " Renko bars" << std::endl;
         renko.exportToCSV("renko_bricks.csv");
 
         Ichimoku ichimoku(conv, base, spanb, disp);
@@ -39,13 +38,19 @@ public:
             double kijun = lines.kijun_sen[i];
             double span_a = lines.senkou_span_a[i];
             double span_b = lines.senkou_span_b[i];
-            double chikou = lines.chikou_span[i];  // Already shifted
+            double chikou = (i >= disp) ? lines.chikou_span[i] : renko_bars[i - disp].close;
 
             double cloud_top = std::max(span_a, span_b);
             double cloud_bottom = std::min(span_a, span_b);
 
             bool buy_signal = (tenkan > kijun) && (price > cloud_top) && (chikou > renko_bars[i - disp].close);
             bool sell_signal = (tenkan < kijun) && (price < cloud_bottom) && (chikou < renko_bars[i - disp].close);
+
+            std::cout << "Time: " << renko_bars[i].time << ", Price: " << price
+                      << ", Tenkan: " << tenkan << ", Kijun: " << kijun
+                      << ", Cloud Top: " << cloud_top << ", Cloud Bottom: " << cloud_bottom
+                      << ", Chikou: " << chikou << ", Buy Signal: " << buy_signal
+                      << ", Sell Signal: " << sell_signal << std::endl;
 
             if (!in_position) {
                 if (buy_signal) {
@@ -76,17 +81,18 @@ public:
                     }
                     long duration = current_trade.exit_time - current_trade.entry_time;
                     if (duration < 0) {
-                        std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time << std::endl;
+                        std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time
+                                  << ", exit_time=" << current_trade.exit_time << std::endl;
                     }
                     std::cout << "Closing trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
-                              << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit << ", duration=" << duration << " seconds" << std::endl;
+                              << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit
+                              << ", duration=" << duration << " seconds" << std::endl;
                     trades.push_back(current_trade);
                     in_position = false;
                 }
             }
         }
 
-        // Close open position at end
         if (in_position) {
             current_trade.exit_time = renko_bars.back().time;
             current_trade.exit_price = renko_bars.back().close;
@@ -97,26 +103,33 @@ public:
             }
             long duration = current_trade.exit_time - current_trade.entry_time;
             if (duration < 0) {
-                std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time << std::endl;
+                std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time
+                          << ", exit_time=" << current_trade.exit_time << std::endl;
             }
             std::cout << "Closing open trade at end: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
-                      << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit << ", duration=" << duration << " seconds" << std::endl;
+                      << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit
+                      << ", duration=" << duration << " seconds" << std::endl;
             trades.push_back(current_trade);
         }
 
         exportTradesToCSV(trades, "trade_executions.csv");
+        std::cout << "Backtest completed. Trades: " << trades.size() << std::endl;
         return trades;
     }
 
     void exportTradesToCSV(const std::vector<Trade>& trades, const std::string& filename) {
         std::ofstream file(filename);
-        if (!file) return;
+        if (!file) {
+            std::cerr << "Failed to open " << filename << " for writing" << std::endl;
+            return;
+        }
         file << "entry_time,entry_price,direction,exit_time,exit_price,profit\n";
         for (const auto& trade : trades) {
             file << trade.entry_time << "," << trade.entry_price << "," << trade.direction << ","
                  << trade.exit_time << "," << trade.exit_price << "," << trade.profit << "\n";
         }
         file.close();
+        std::cout << "Exported trades to " << filename << std::endl;
     }
 };
 
