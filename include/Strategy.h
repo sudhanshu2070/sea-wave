@@ -1,5 +1,5 @@
 // Strategy.h
-// Renko + Ichimoku Strategy
+// Updated with logging for trade openings, closings, and durations
 #ifndef STRATEGY_H
 #define STRATEGY_H
 
@@ -9,6 +9,7 @@
 #include "Ichimoku.h"
 #include "Trade.h"
 #include <fstream>
+#include <iostream>
 
 class Strategy {
 private:
@@ -32,20 +33,16 @@ public:
         bool in_position = false;
         Trade current_trade;
 
-        for (size_t i = std::max(base, spanb) + disp; i < renko_bars.size(); ++i) {
+        for (size_t i = std::max(conv, std::max(base, spanb)) + disp - 1; i < renko_bars.size(); ++i) {
             double price = renko_bars[i].close;
             double tenkan = lines.tenkan_sen[i];
             double kijun = lines.kijun_sen[i];
             double span_a = lines.senkou_span_a[i];
             double span_b = lines.senkou_span_b[i];
-            double chikou = lines.chikou_span[i - disp];  // Chikou is past close
+            double chikou = lines.chikou_span[i];  // Already shifted
 
             double cloud_top = std::max(span_a, span_b);
             double cloud_bottom = std::min(span_a, span_b);
-
-            // Simple strategy: Buy when Tenkan > Kijun, price > cloud, chikou > price (bullish)
-            // Sell when Tenkan < Kijun, price < cloud, chikou < price (bearish)
-            // Exit on opposite signal
 
             bool buy_signal = (tenkan > kijun) && (price > cloud_top) && (chikou > renko_bars[i - disp].close);
             bool sell_signal = (tenkan < kijun) && (price < cloud_bottom) && (chikou < renko_bars[i - disp].close);
@@ -56,11 +53,13 @@ public:
                     current_trade.entry_price = price;
                     current_trade.direction = "long";
                     in_position = true;
+                    std::cout << "Opening long trade: time=" << current_trade.entry_time << ", price=" << current_trade.entry_price << std::endl;
                 } else if (sell_signal) {
                     current_trade.entry_time = renko_bars[i].time;
                     current_trade.entry_price = price;
                     current_trade.direction = "short";
                     in_position = true;
+                    std::cout << "Opening short trade: time=" << current_trade.entry_time << ", price=" << current_trade.entry_price << std::endl;
                 }
             } else {
                 bool exit_long = sell_signal || (tenkan < kijun);
@@ -75,6 +74,12 @@ public:
                     } else {
                         current_trade.profit = (current_trade.entry_price - current_trade.exit_price);
                     }
+                    long duration = current_trade.exit_time - current_trade.entry_time;
+                    if (duration < 0) {
+                        std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time << std::endl;
+                    }
+                    std::cout << "Closing trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
+                              << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit << ", duration=" << duration << " seconds" << std::endl;
                     trades.push_back(current_trade);
                     in_position = false;
                 }
@@ -90,6 +95,12 @@ public:
             } else {
                 current_trade.profit = (current_trade.entry_price - current_trade.exit_price);
             }
+            long duration = current_trade.exit_time - current_trade.entry_time;
+            if (duration < 0) {
+                std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time << std::endl;
+            }
+            std::cout << "Closing open trade at end: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
+                      << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit << ", duration=" << duration << " seconds" << std::endl;
             trades.push_back(current_trade);
         }
 
