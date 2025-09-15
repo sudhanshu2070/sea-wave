@@ -1,4 +1,7 @@
- #ifndef STRATEGY_H
+// Updated to convert timestamps to IST (UTC+5:30) in logs and CSVs
+// Added IST columns to trade_executions.csv: entry_time_ist, exit_time_ist
+// Changed default symbol to ETHUSD in backtest calls (but endpoint uses query param)
+#ifndef STRATEGY_H
 #define STRATEGY_H
 
 #include <vector>
@@ -8,11 +11,23 @@
 #include "Trade.h"
 #include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <ctime>  // For timestamp conversion
 
 class Strategy {
 private:
     double brick_size;
     int conv, base, spanb, disp;
+
+    // Function to convert Unix timestamp to IST string (YYYY-MM-DD HH:MM:SS IST)
+    std::string unixToIST(long unix_time) {
+        unix_time += 19800;  // Add 5.5 hours (5*3600 + 30*60 = 19800 seconds)
+        std::time_t t = static_cast<std::time_t>(unix_time);
+        std::tm* tm = std::localtime(&t);
+        std::ostringstream oss;
+        oss << std::put_time(tm, "%Y-%m-%d %H:%M:%S") << " IST";
+        return oss.str();
+    }
 
 public:
     Strategy(double bs = 40.0, int c = 5, int b = 26, int sb = 52, int d = 26)
@@ -46,7 +61,8 @@ public:
             bool buy_signal = (tenkan > kijun) && (price > cloud_top) && (chikou > renko_bars[i - disp].close);
             bool sell_signal = (tenkan < kijun) && (price < cloud_bottom) && (chikou < renko_bars[i - disp].close);
 
-            std::cout << "Time: " << renko_bars[i].time << ", Price: " << price
+            std::cout << "Time: " << renko_bars[i].time << " (" << unixToIST(renko_bars[i].time) << ")"
+                      << ", Price: " << price
                       << ", Tenkan: " << tenkan << ", Kijun: " << kijun
                       << ", Cloud Top: " << cloud_top << ", Cloud Bottom: " << cloud_bottom
                       << ", Chikou: " << chikou << ", Buy Signal: " << buy_signal
@@ -58,13 +74,15 @@ public:
                     current_trade.entry_price = price;
                     current_trade.direction = "long";
                     in_position = true;
-                    std::cout << "Opening long trade: time=" << current_trade.entry_time << ", price=" << current_trade.entry_price << std::endl;
+                    std::cout << "Opening long trade: time=" << current_trade.entry_time << " (" << unixToIST(current_trade.entry_time) << ")"
+                              << ", price=" << current_trade.entry_price << std::endl;
                 } else if (sell_signal) {
                     current_trade.entry_time = renko_bars[i].time;
                     current_trade.entry_price = price;
                     current_trade.direction = "short";
                     in_position = true;
-                    std::cout << "Opening short trade: time=" << current_trade.entry_time << ", price=" << current_trade.entry_price << std::endl;
+                    std::cout << "Opening short trade: time=" << current_trade.entry_time << " (" << unixToIST(current_trade.entry_time) << ")"
+                              << ", price=" << current_trade.entry_price << std::endl;
                 }
             } else {
                 bool exit_long = sell_signal || (tenkan < kijun);
@@ -82,9 +100,11 @@ public:
                     long duration = current_trade.exit_time - current_trade.entry_time;
                     if (duration < 0) {
                         std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time
-                                  << ", exit_time=" << current_trade.exit_time << std::endl;
+                                  << " (" << unixToIST(current_trade.entry_time) << "), exit_time=" << current_trade.exit_time
+                                  << " (" << unixToIST(current_trade.exit_time) << ")" << std::endl;
                     }
-                    std::cout << "Closing trade: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
+                    std::cout << "Closing trade: entry_time=" << current_trade.entry_time << " (" << unixToIST(current_trade.entry_time) << ")"
+                              << ", exit_time=" << current_trade.exit_time << " (" << unixToIST(current_trade.exit_time) << ")"
                               << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit
                               << ", duration=" << duration << " seconds" << std::endl;
                     trades.push_back(current_trade);
@@ -104,9 +124,11 @@ public:
             long duration = current_trade.exit_time - current_trade.entry_time;
             if (duration < 0) {
                 std::cerr << "Warning: Negative duration detected for trade: entry_time=" << current_trade.entry_time
-                          << ", exit_time=" << current_trade.exit_time << std::endl;
+                          << " (" << unixToIST(current_trade.entry_time) << "), exit_time=" << current_trade.exit_time
+                          << " (" << unixToIST(current_trade.exit_time) << ")" << std::endl;
             }
-            std::cout << "Closing open trade at end: entry_time=" << current_trade.entry_time << ", exit_time=" << current_trade.exit_time
+            std::cout << "Closing open trade at end: entry_time=" << current_trade.entry_time << " (" << unixToIST(current_trade.entry_time) << ")"
+                      << ", exit_time=" << current_trade.exit_time << " (" << unixToIST(current_trade.exit_time) << ")"
                       << ", direction=" << current_trade.direction << ", profit=" << current_trade.profit
                       << ", duration=" << duration << " seconds" << std::endl;
             trades.push_back(current_trade);
@@ -123,10 +145,10 @@ public:
             std::cerr << "Failed to open " << filename << " for writing" << std::endl;
             return;
         }
-        file << "entry_time,entry_price,direction,exit_time,exit_price,profit\n";
+        file << "entry_time,entry_time_ist,entry_price,direction,exit_time,exit_time_ist,exit_price,profit\n";
         for (const auto& trade : trades) {
-            file << trade.entry_time << "," << trade.entry_price << "," << trade.direction << ","
-                 << trade.exit_time << "," << trade.exit_price << "," << trade.profit << "\n";
+            file << trade.entry_time << "," << unixToIST(trade.entry_time) << "," << trade.entry_price << "," << trade.direction << ","
+                 << trade.exit_time << "," << unixToIST(trade.exit_time) << "," << trade.exit_price << "," << trade.profit << "\n";
         }
         file.close();
         std::cout << "Exported trades to " << filename << std::endl;

@@ -1,5 +1,3 @@
-// BacktestController.h
-// Pistache controller for backtest endpoint
 #ifndef BACKTEST_CONTROLLER_H
 #define BACKTEST_CONTROLLER_H
 
@@ -15,10 +13,10 @@ public:
     }
 
     static void handleBacktest(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
-        auto symbol = request.query().get("symbol").value_or("BTCUSD");
+        auto symbol = request.query().get("symbol").value_or("ETHUSD");
         auto resolution = request.query().get("resolution").value_or("1m");
-        long start = std::stol(request.query().get("start").value_or("0"));
-        long end = std::stol(request.query().get("end").value_or(std::to_string(time(nullptr))));
+        long start = std::stol(request.query().get("start").value_or("1743448200")); // June 1, 2025, 00:00:00 IST (May 31, 2025, 18:30:00 UTC)
+        long end = std::stol(request.query().get("end").value_or("1756724999"));   // September 1, 2025, 23:59:59 IST (September 1, 2025, 18:29:59 UTC)
 
         auto ohlc_data = fetchCandles(symbol, resolution, start, end);
 
@@ -30,7 +28,6 @@ public:
         Strategy strategy(40.0, 5, 26, 52, 26);
         auto trades = strategy.backtest(ohlc_data);
 
-        // Return summary or something
         std::string result = "Backtest completed. Trades: " + std::to_string(trades.size()) + "\nCSVs exported: renko_bricks.csv and trade_executions.csv";
         response.send(Pistache::Http::Code::Ok, result);
     }
