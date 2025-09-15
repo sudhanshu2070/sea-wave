@@ -15,8 +15,8 @@ public:
     static void handleBacktest(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
         auto symbol = request.query().get("symbol").value_or("ETHUSDT");
         auto resolution = request.query().get("resolution").value_or("5m");
-        long start = std::stol(request.query().get("start").value_or("1754016000")); // August 1, 2025, 00:00:00 IST
-        long end = std::stol(request.query().get("end").value_or("1756724999"));   // September 1, 2025, 23:59:59 IST
+        long start = std::stol(request.query().get("start").value_or("1753996200")); // August 1, 2025, 00:00:00 IST
+        long end = std::stol(request.query().get("end").value_or("1756715999"));     // September 1, 2025, 23:59:59 IST
 
         auto ohlc_data = fetchCandles(symbol, resolution, start, end);
 
