@@ -2,6 +2,9 @@
 #define ICHIMOKU_H
 
 #include <vector>
+#include <algorithm>
+#include <limits>
+#include <iostream>
 #include "Renko.h"
 
 struct IchimokuLines {
@@ -16,9 +19,19 @@ private:
     int tenkan_len, kijun_len, span_b_len, displacement;
 
     double donchian_mid(const std::vector<double>& prices, size_t index, int length) {
-        if (index < length - 1) return std::numeric_limits<double>::quiet_NaN();
-        double max_val = *std::max_element(prices.begin() + index - length + 1, prices.begin() + index + 1);
-        double min_val = *std::min_element(prices.begin() + index - length + 1, prices.begin() + index + 1);
+        if (index < length - 1 || index >= prices.size()) {
+            std::cerr << "donchian_mid: Invalid index " << index << " for length " << length 
+                      << ", prices.size=" << prices.size() << std::endl;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        auto start = prices.begin() + index - length + 1;
+        auto end = prices.begin() + index + 1;
+        if (start < prices.begin() || end > prices.end()) {
+            std::cerr << "donchian_mid: Invalid range for index " << index << std::endl;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        double max_val = *std::max_element(start, end);
+        double min_val = *std::min_element(start, end);
         return (max_val + min_val) / 2.0;
     }
 
@@ -28,10 +41,15 @@ public:
 
     IchimokuLines calculate(const std::vector<RenkoBar>& bars) {
         IchimokuLines lines;
-        lines.tenkan_sen.resize(bars.size());
-        lines.kijun_sen.resize(bars.size());
-        lines.span_a.resize(bars.size());
-        lines.span_b.resize(bars.size());
+        if (bars.empty()) {
+            std::cerr << "Ichimoku::calculate: Empty Renko bars" << std::endl;
+            return lines;
+        }
+
+        lines.tenkan_sen.resize(bars.size(), std::numeric_limits<double>::quiet_NaN());
+        lines.kijun_sen.resize(bars.size(), std::numeric_limits<double>::quiet_NaN());
+        lines.span_a.resize(bars.size(), std::numeric_limits<double>::quiet_NaN());
+        lines.span_b.resize(bars.size(), std::numeric_limits<double>::quiet_NaN());
 
         std::vector<double> closes(bars.size());
         for (size_t i = 0; i < bars.size(); ++i) {
@@ -39,12 +57,24 @@ public:
         }
 
         for (size_t i = 0; i < bars.size(); ++i) {
-            lines.tenkan_sen[i] = donchian_mid(closes, i, tenkan_len);
-            lines.kijun_sen[i] = donchian_mid(closes, i, kijun_len);
-            lines.span_b[i] = donchian_mid(closes, i, span_b_len);
-            lines.span_a[i] = (lines.tenkan_sen[i] + lines.kijun_sen[i]) / 2.0;
+            if (i >= tenkan_len - 1) {
+                lines.tenkan_sen[i] = donchian_mid(closes, i, tenkan_len);
+            }
+            if (i >= kijun_len - 1) {
+                lines.kijun_sen[i] = donchian_mid(closes, i, kijun_len);
+            }
+            if (i >= span_b_len - 1) {
+                lines.span_b[i] = donchian_mid(closes, i, span_b_len);
+            }
+            if (!std::isnan(lines.tenkan_sen[i]) && !std::isnan(lines.kijun_sen[i])) {
+                lines.span_a[i] = (lines.tenkan_sen[i] + lines.kijun_sen[i]) / 2.0;
+            }
         }
 
+        std::cout << "Ichimoku calculated: tenkan_sen.size=" << lines.tenkan_sen.size() 
+                  << ", kijun_sen.size=" << lines.kijun_sen.size() 
+                  << ", span_a.size=" << lines.span_a.size() 
+                  << ", span_b.size=" << lines.span_b.size() << std::endl;
         return lines;
     }
 };

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <ctime>
 #include <iostream>
+#include <limits>
 #include "OHLC.h"
 #include "Renko.h"
 #include "Ichimoku.h"
@@ -43,10 +44,19 @@ public:
         RenkoBuilder renko(brick_size, reversal_size);
         renko.buildFromOHLC(ohlc_data);
         auto renko_bars = renko.getRenkoBars();
+        if (renko_bars.empty()) {
+            std::cerr << "No Renko bars generated. Exiting backtest." << std::endl;
+            return {};
+        }
         renko.exportToCSV("renko_with_ichimoku.csv");
 
         Ichimoku ichimoku(tenkan_len, kijun_len, span_b_len, displacement);
         auto lines = ichimoku.calculate(renko_bars);
+        if (lines.tenkan_sen.size() != renko_bars.size()) {
+            std::cerr << "Ichimoku lines size mismatch: tenkan_sen.size=" << lines.tenkan_sen.size() 
+                      << ", renko_bars.size=" << renko_bars.size() << std::endl;
+            return {};
+        }
 
         std::vector<Trade> trades;
         std::vector<StrategyLog> logs;
@@ -54,6 +64,12 @@ public:
         bool in_position = false;
 
         for (size_t i = 0; i < renko_bars.size(); ++i) {
+            if (i >= lines.tenkan_sen.size() || i >= lines.kijun_sen.size() || 
+                i >= lines.span_a.size() || i >= lines.span_b.size()) {
+                std::cerr << "Index " << i << " exceeds Ichimoku lines size" << std::endl;
+                continue;
+            }
+
             double c = renko_bars[i].close;
             double kijun = lines.kijun_sen[i];
             double sa = lines.span_a[i];
@@ -135,6 +151,12 @@ public:
                     position.exit_time = renko_bars[i].brick_time;
                     position.exit_price = c;
                     position.profit = c - position.entry_price;
+                    long duration = position.exit_time - position.entry_time;
+                    if (duration < 0) {
+                        std::cerr << "Warning: Negative duration detected: entry_time=" << position.entry_time
+                                  << " (" << unixToIST(position.entry_time) << "), exit_time=" << position.exit_time
+                                  << " (" << unixToIST(position.exit_time) << ")" << std::endl;
+                    }
                     trades.push_back(position);
                     log.action = "exit_long";
                     log.reason = "Renko closed below kijun or below cloud_top";
@@ -142,11 +164,17 @@ public:
                     std::cout << "Closing trade: entry_time=" << position.entry_time << " (" << unixToIST(position.entry_time) << ")"
                               << ", exit_time=" << position.exit_time << " (" << unixToIST(position.exit_time) << ")"
                               << ", direction=" << position.direction << ", profit=" << position.profit
-                              << ", duration=" << (position.exit_time - position.entry_time) << " seconds" << std::endl;
+                              << ", duration=" << duration << " seconds" << std::endl;
                 } else if (position.direction == "short" && short_exit) {
                     position.exit_time = renko_bars[i].brick_time;
                     position.exit_price = c;
                     position.profit = position.entry_price - c;
+                    long duration = position.exit_time - position.entry_time;
+                    if (duration < 0) {
+                        std::cerr << "Warning: Negative duration detected: entry_time=" << position.entry_time
+                                  << " (" << unixToIST(position.entry_time) << "), exit_time=" << position.exit_time
+                                  << " (" << unixToIST(position.exit_time) << ")" << std::endl;
+                    }
                     trades.push_back(position);
                     log.action = "exit_short";
                     log.reason = "Renko closed above kijun or above cloud_bottom";
@@ -154,7 +182,7 @@ public:
                     std::cout << "Closing trade: entry_time=" << position.entry_time << " (" << unixToIST(position.entry_time) << ")"
                               << ", exit_time=" << position.exit_time << " (" << unixToIST(position.exit_time) << ")"
                               << ", direction=" << position.direction << ", profit=" << position.profit
-                              << ", duration=" << (position.exit_time - position.entry_time) << " seconds" << std::endl;
+                              << ", duration=" << duration << " seconds" << std::endl;
                 } else {
                     log.action = (position.direction == "long") ? "hold_long" : "hold_short";
                     log.reason = "Exit conditions not met";
@@ -170,6 +198,12 @@ public:
             position.exit_price = renko_bars.back().close;
             position.profit = (position.direction == "long") ? (position.exit_price - position.entry_price) :
                                                               (position.entry_price - position.exit_price);
+            long duration = position.exit_time - position.entry_time;
+            if (duration < 0) {
+                std::cerr << "Warning: Negative duration detected: entry_time=" << position.entry_time
+                          << " (" << unixToIST(position.entry_time) << "), exit_time=" << position.exit_time
+                          << " (" << unixToIST(position.exit_time) << ")" << std::endl;
+            }
             trades.push_back(position);
             StrategyLog log;
             log.time = position.exit_time;
@@ -189,17 +223,22 @@ public:
             std::cout << "Closing open trade at end: entry_time=" << position.entry_time << " (" << unixToIST(position.entry_time) << ")"
                       << ", exit_time=" << position.exit_time << " (" << unixToIST(position.exit_time) << ")"
                       << ", direction=" << position.direction << ", profit=" << position.profit
-                      << ", duration=" << (position.exit_time - position.entry_time) << " seconds" << std::endl;
+                      << ", duration=" << duration << " seconds" << std::endl;
         }
 
         exportTradesToCSV(trades, "trades.csv");
         exportLogsToCSV(logs, "strategy_logs.csv");
 
-        // Save renko_with_ichimoku.csv
+        // Save renko_with_ichimoku.csv with Ichimoku data
         std::ofstream ri_file("renko_with_ichimoku.csv");
         if (ri_file) {
             ri_file << "brick_time,brick_time_ist,brick_start_time,brick_start_time_ist,src_open,src_high,src_low,src_close,open,high,low,close,dir,reversal,tenkan,kijun,span_a,span_b\n";
             for (size_t i = 0; i < renko_bars.size(); ++i) {
+                if (i >= lines.tenkan_sen.size() || i >= lines.kijun_sen.size() || 
+                    i >= lines.span_a.size() || i >= lines.span_b.size()) {
+                    std::cerr << "Index " << i << " exceeds Ichimoku lines size in renko_with_ichimoku.csv" << std::endl;
+                    continue;
+                }
                 ri_file << renko_bars[i].brick_time << "," << unixToIST(renko_bars[i].brick_time) << ","
                         << renko_bars[i].brick_start_time << "," << unixToIST(renko_bars[i].brick_start_time) << ","
                         << renko_bars[i].src_open << "," << renko_bars[i].src_high << "," << renko_bars[i].src_low << "," << renko_bars[i].src_close << ","
@@ -209,6 +248,8 @@ public:
             }
             ri_file.close();
             std::cout << "Exported renko with Ichimoku to renko_with_ichimoku.csv" << std::endl;
+        } else {
+            std::cerr << "Failed to open renko_with_ichimoku.csv for writing" << std::endl;
         }
 
         double net_profit = 0.0;
