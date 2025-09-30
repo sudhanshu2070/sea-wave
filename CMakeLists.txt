@@ -18,12 +18,20 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Include directories
 include_directories(include)
 include_directories(src/third_party)
+include_directories(/usr/include)
 
-# Find dependencies
+
+# Find dependencies using find_package and pkg-config
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PISTACHE REQUIRED pistache)
-pkg_check_modules(LIBCURL REQUIRED libcurl)
-pkg_check_modules(NLOHMANN_JSON REQUIRED nlohmann_json)
+
+# Find Pistache
+pkg_check_modules(PISTACHE REQUIRED libpistache)
+
+# Find libcurl
+find_package(CURL REQUIRED)
+
+# Find JSON (header-only)
+find_package(nlohmann_json 3.2.0 REQUIRED)
 
 # Add executable
 add_executable(strategy_api
@@ -32,12 +40,15 @@ add_executable(strategy_api
     src/strategy_engine.cpp
 )
 
+# Include directories from pkg-config
+target_include_directories(strategy_api PRIVATE ${PISTACHE_INCLUDE_DIRS})
+
 # Link libraries
 target_link_libraries(strategy_api
     ${PISTACHE_LIBRARIES}
-    ${LIBCURL_LIBRARIES}
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
     pthread
-    stdc++fs
 )
 
 # Compiler flags
@@ -48,6 +59,13 @@ target_compile_options(strategy_api PRIVATE
     -O2
 )
 
-# Installation
-install(TARGETS strategy_api DESTINATION bin)
-install(DIRECTORY include/ DESTINATION include)
+# Set C++ standard properties
+set_target_properties(strategy_api PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Pistache includes: ${PISTACHE_INCLUDE_DIRS}")
+message(STATUS "Pistache libraries: ${PISTACHE_LIBRARIES}")

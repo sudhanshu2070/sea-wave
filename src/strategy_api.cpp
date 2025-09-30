@@ -1,66 +1,14 @@
 #include "strategy_api.h"
-#include <iostream>
+#include "strategy_engine.h"
 #include <fstream>
-#include <sstream>
-#include <cmath>
-#include <ctime>
-#include <thread>
-#include <chrono>
-#include <numeric>
+#include <iostream>
 #include <curl/curl.h>
-#include "nlohmann/json.hpp"
-
-// Include all the existing strategy code here (or link separately)
-// For brevity, I'll show how to integrate the existing functions
 
 using namespace std;
 
-// -------- Forward declarations of existing functions --------
-// (These should be in a separate header or the same file)
-
-struct Candle {
-    int64_t time;
-    double open, high, low, close, volume;
-};
-
-struct RenkoBrick {
-    int64_t brick_time, brick_start_time;
-    double src_open, src_high, src_low, src_close;
-    double open, high, low, close;
-    int dir;
-    bool reversal;
-};
-
-struct IchimokuRow {
-    int64_t brick_time;
-    double close;
-    double tenkan, kijun, span_a, span_b, chikou;
-};
-
-struct Trade {
-    int64_t entry_time;
-    double entry_price;
-    int64_t exit_time;
-    double exit_price;
-    std::string direction;
-    double profit;
-};
-
-// Existing function declarations
-int64_t ist_to_unix(const std::string &date_str, const std::string &with_time = "00:00:00");
-int resolution_seconds(const std::string &res);
-size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* s);
-std::string epoch_to_ist_iso(int64_t epoch_sec);
-double get_source_price(const Candle &c, const std::string &source);
-std::vector<Candle> fetch_candles(const std::string &symbol, const std::string &resolution, 
-                                 int64_t start_time, int64_t end_time, int limit = 4000);
-std::vector<RenkoBrick> build_renko(const std::vector<Candle> &candles, double brick_size, 
-                                   double reversal_size, const std::string &source);
-std::vector<IchimokuRow> ichimoku_on_renko(const std::vector<RenkoBrick> &renko, 
-                                          int tenkan_len, int kijun_len, int span_b_len, int displacement);
-std::vector<Trade> run_strategy(const std::vector<IchimokuRow> &ri);
-
-// -------- StrategyController Implementation --------
+StrategyController::StrategyController() {
+    loadDefaultConfig();
+}
 
 void StrategyController::setupRoutes(Rest::Router& router) {
     using namespace Rest;
@@ -68,14 +16,14 @@ void StrategyController::setupRoutes(Rest::Router& router) {
     Routes::Post(router, "/backtest/run", Routes::bind(&StrategyController::runBacktest, this));
     Routes::Get(router, "/config", Routes::bind(&StrategyController::getConfig, this));
     Routes::Put(router, "/config", Routes::bind(&StrategyController::updateConfig, this));
+    Routes::Get(router, "/health", Routes::bind(&StrategyController::getHealth, this));
 }
 
 void StrategyController::runBacktest(const Rest::Request& request, Http::ResponseWriter response) {
     try {
         json request_body;
-        StrategyConfig config = current_config_; // Start with current config
+        StrategyConfig config = current_config_;
         
-        // Parse request body if provided
         if (!request.body().empty()) {
             request_body = json::parse(request.body());
             
@@ -111,18 +59,22 @@ void StrategyController::runBacktest(const Rest::Request& request, Http::Respons
         auto result = runStrategyWithConfig(config);
         
         response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
+        response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
         response.send(Http::Code::Ok, result.dump());
         
-    } catch (const std::exception& e) {
+    } catch (const exception& e) {
         json error_response = {
             {"error", true},
             {"message", e.what()}
         };
+        response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
         response.send(Http::Code::Bad_Request, error_response.dump());
     }
 }
 
 void StrategyController::getConfig(const Rest::Request& request, Http::ResponseWriter response) {
+    (void)request; // Mark as unused
+    
     json config_json = {
         {"symbol", current_config_.symbol},
         {"resolution", current_config_.resolution},
@@ -140,6 +92,7 @@ void StrategyController::getConfig(const Rest::Request& request, Http::ResponseW
     };
     
     response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
+    response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
     response.send(Http::Code::Ok, config_json.dump());
 }
 
@@ -180,95 +133,50 @@ void StrategyController::updateConfig(const Rest::Request& request, Http::Respon
         };
         
         response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
+        response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
         response.send(Http::Code::Ok, success_response.dump());
         
-    } catch (const std::exception& e) {
+    } catch (const exception& e) {
         json error_response = {
             {"error", true},
             {"message", e.what()}
         };
+        response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
         response.send(Http::Code::Bad_Request, error_response.dump());
     }
 }
 
-json StrategyController::runStrategyWithConfig(const StrategyConfig& config) {
-    int64_t start_ts = ist_to_unix(config.start_date, config.start_time);
-    int64_t end_ts   = ist_to_unix(config.end_date, config.end_time);
+void StrategyController::getHealth(const Rest::Request& request, Http::ResponseWriter response) {
+    (void)request; // Mark as unused
     
-    auto df = fetch_candles(config.symbol, config.resolution, start_ts, end_ts);
-    auto renko = build_renko(df, config.brick_size, config.reversal_size, config.source_type);
-    auto ri = ichimoku_on_renko(renko, config.tenkan, config.kijun, config.span_b, config.displacement);
-    auto trades = run_strategy(ri);
-    
-    // Calculate performance metrics
-    double total_profit = 0;
-    int win = 0, loss = 0;
-    double max_drawdown = 0, peak = 0;
-    vector<double> equity_curve;
-    
-    for (auto &t : trades) {
-        total_profit += t.profit;
-        if (t.profit > 0) win++; else loss++;
-        double eq = (equity_curve.empty() ? 0 : equity_curve.back()) + t.profit;
-        equity_curve.push_back(eq);
-        if (eq > peak) peak = eq;
-        max_drawdown = max(max_drawdown, peak - eq);
-    }
-    
-    double win_rate = trades.empty() ? 0 : (static_cast<double>(win) / trades.size()) * 100;
-    
-    // Prepare JSON response
-    json result = {
-        {"summary", {
-            {"total_trades", trades.size()},
-            {"winning_trades", win},
-            {"losing_trades", loss},
-            {"win_rate", win_rate},
-            {"total_profit", total_profit},
-            {"max_drawdown", max_drawdown},
-            {"avg_trade_profit", trades.empty() ? 0 : total_profit / trades.size()}
-        }},
-        {"config_used", {
-            {"symbol", config.symbol},
-            {"resolution", config.resolution},
-            {"brick_size", config.brick_size},
-            {"reversal_size", config.reversal_size},
-            {"source_type", config.source_type},
-            {"start_date", config.start_date},
-            {"end_date", config.end_date},
-            {"tenkan", config.tenkan},
-            {"kijun", config.kijun},
-            {"span_b", config.span_b},
-            {"displacement", config.displacement}
-        }}
+    json health = {
+        {"status", "healthy"},
+        {"service", "Strategy Backtest API"},
+        {"timestamp", time(nullptr)},
+        {"version", "1.0.0"}
     };
     
-    // Add trades data
-    json trades_json = json::array();
-    for (const auto& trade : trades) {
-        trades_json.push_back({
-            {"entry_time", epoch_to_ist_iso(trade.entry_time)},
-            {"entry_price", trade.entry_price},
-            {"exit_time", epoch_to_ist_iso(trade.exit_time)},
-            {"exit_price", trade.exit_price},
-            {"direction", trade.direction},
-            {"profit", trade.profit}
-        });
-    }
-    result["trades"] = trades_json;
-    
-    return result;
+    response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
+    response.headers().add<Http::Header::AccessControlAllowOrigin>("*");
+    response.send(Http::Code::Ok, health.dump());
 }
 
-// -------- StrategyAPI Implementation --------
+json StrategyController::runStrategyWithConfig(const StrategyConfig& config) {
+    return StrategyEngine::runBacktest(config);
+}
 
+void StrategyController::loadDefaultConfig() {
+    // Default values are already set in the struct definition
+}
+
+// StrategyAPI implementation
 StrategyAPI::StrategyAPI(Address addr) 
     : httpEndpoint_(std::make_shared<Http::Endpoint>(addr)) {}
 
 void StrategyAPI::init(size_t thr) {
     auto opts = Http::Endpoint::options()
         .threads(thr)
-        .flags(Tcp::Options::InstallSignalHandler);
+        .flags(Tcp::Options::ReuseAddr);
     httpEndpoint_->init(opts);
     setupRoutes();
 }
@@ -283,12 +191,5 @@ void StrategyAPI::stop() {
 }
 
 void StrategyAPI::setupRoutes() {
-    StrategyController strategyController;
-    strategyController.setupRoutes(router_);
-    
-    // Health check endpoint
-    Routes::Get(router_, "/health", Routes::bind([](const Rest::Request& request, Http::ResponseWriter response) {
-        json health = {{"status", "healthy"}, {"service", "Strategy Backtest API"}};
-        response.send(Http::Code::Ok, health.dump());
-    }));
+    strategyController_.setupRoutes(router_);
 }
