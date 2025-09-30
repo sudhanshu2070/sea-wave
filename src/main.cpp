@@ -10,6 +10,7 @@ using namespace std;
 std::unique_ptr<StrategyAPI> api;
 
 void shutdownHandler(int signal) {
+    (void)signal; // Mark as unused
     cout << "\nShutting down server..." << endl;
     if (api) {
         api->stop();
@@ -48,6 +49,9 @@ int main() {
         cout << "  GET  /config" << endl;
         cout << "  PUT  /config" << endl;
         cout << "  GET  /health" << endl;
+        cout << "  GET  /download/renko" << endl;
+        cout << "  GET  /download/trades" << endl;
+        cout << "  GET  /download/summary" << endl;
         cout << "Press Ctrl+C to stop the server" << endl;
         
         api->start();

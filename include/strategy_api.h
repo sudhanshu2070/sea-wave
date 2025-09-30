@@ -25,11 +25,21 @@ public:
     void updateConfig(const Rest::Request& request, Http::ResponseWriter response);
     void getHealth(const Rest::Request& request, Http::ResponseWriter response);
     
+    // CSV download endpoints
+    void downloadRenkoCSV(const Rest::Request& request, Http::ResponseWriter response);
+    void downloadTradesCSV(const Rest::Request& request, Http::ResponseWriter response);
+    void downloadSummaryCSV(const Rest::Request& request, Http::ResponseWriter response);
+    
 private:
     StrategyConfig current_config_;
     
     json runStrategyWithConfig(const StrategyConfig& config);
     void loadDefaultConfig();
+    
+    // CSV generation methods
+    std::string generateRenkoCSV(const json& backtestResult);
+    std::string generateTradesCSV(const json& backtestResult);
+    std::string generateSummaryCSV(const json& backtestResult);
 };
 
 class StrategyAPI {

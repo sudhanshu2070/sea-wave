@@ -20,7 +20,6 @@ include_directories(include)
 include_directories(src/third_party)
 include_directories(/usr/include)
 
-
 # Find dependencies using find_package and pkg-config
 find_package(PkgConfig REQUIRED)
 

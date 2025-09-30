@@ -17,6 +17,11 @@ void StrategyController::setupRoutes(Rest::Router& router) {
     Routes::Get(router, "/config", Routes::bind(&StrategyController::getConfig, this));
     Routes::Put(router, "/config", Routes::bind(&StrategyController::updateConfig, this));
     Routes::Get(router, "/health", Routes::bind(&StrategyController::getHealth, this));
+    
+    // CSV download endpoints
+    Routes::Get(router, "/download/renko", Routes::bind(&StrategyController::downloadRenkoCSV, this));
+    Routes::Get(router, "/download/trades", Routes::bind(&StrategyController::downloadTradesCSV, this));
+    Routes::Get(router, "/download/summary", Routes::bind(&StrategyController::downloadSummaryCSV, this));
 }
 
 void StrategyController::runBacktest(const Rest::Request& request, Http::ResponseWriter response) {
@@ -161,8 +166,68 @@ void StrategyController::getHealth(const Rest::Request& request, Http::ResponseW
     response.send(Http::Code::Ok, health.dump());
 }
 
+void StrategyController::downloadRenkoCSV(const Rest::Request& request, Http::ResponseWriter response) {
+    (void)request; // Mark as unused
+    
+    try {
+        auto result = StrategyEngine::runBacktest(current_config_);
+        string csv_content = StrategyEngine::generateCSV(result, "renko");
+        
+        // Set CSV headers - simplified without ContentDisposition
+        response.headers().add<Http::Header::ContentType>("text/csv");
+        response.send(Http::Code::Ok, csv_content);
+        
+    } catch (const exception& e) {
+        response.send(Http::Code::Internal_Server_Error, e.what());
+    }
+}
+
+void StrategyController::downloadTradesCSV(const Rest::Request& request, Http::ResponseWriter response) {
+    (void)request; // Mark as unused
+    
+    try {
+        auto result = StrategyEngine::runBacktest(current_config_);
+        string csv_content = StrategyEngine::generateCSV(result, "trades");
+        
+        response.headers().add<Http::Header::ContentType>("text/csv");
+        response.send(Http::Code::Ok, csv_content);
+        
+    } catch (const exception& e) {
+        response.send(Http::Code::Internal_Server_Error, e.what());
+    }
+}
+
+void StrategyController::downloadSummaryCSV(const Rest::Request& request, Http::ResponseWriter response) {
+    (void)request; // Mark as unused
+    
+    try {
+        auto result = StrategyEngine::runBacktest(current_config_);
+        string csv_content = StrategyEngine::generateCSV(result, "summary");
+        
+        response.headers().add<Http::Header::ContentType>("text/csv");
+        response.send(Http::Code::Ok, csv_content);
+        
+    } catch (const exception& e) {
+        response.send(Http::Code::Internal_Server_Error, e.what());
+    }
+}
+
 json StrategyController::runStrategyWithConfig(const StrategyConfig& config) {
-    return StrategyEngine::runBacktest(config);
+    auto result = StrategyEngine::runBacktest(config);
+    
+    json response = {
+        {"summary", result.summary},
+        {"config_used", result.config_used},
+        {"trades", result.trades},
+        {"renko_data", result.renko_data},
+        {"csv_downloads", {
+            {"renko_data", "/download/renko"},
+            {"trades_data", "/download/trades"}, 
+            {"summary", "/download/summary"}
+        }}
+    };
+    
+    return response;
 }
 
 void StrategyController::loadDefaultConfig() {
