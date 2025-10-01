@@ -34,3 +34,4 @@ target_link_libraries(backtest_api
 
 # Compile options
 target_compile_options(backtest_api PRIVATE -O2 -Wall -Wextra)
+target_compile_options(backtest_api PRIVATE -std=c++17 -O2 -Wall)

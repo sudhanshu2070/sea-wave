@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <memory>
+#include <curl/curl.h>
 #include "../include/backtest/data_fetcher.hpp"
 #include "../include/backtest/renko.hpp"
 #include "../include/backtest/ichimoku.hpp"

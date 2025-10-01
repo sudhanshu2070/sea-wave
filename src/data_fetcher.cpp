@@ -4,6 +4,7 @@
 #include <thread>
 #include <iostream>
 #include <algorithm>
+#include <sstream>  
 
 using json = nlohmann::json;
 
@@ -25,6 +26,26 @@ static int resolution_seconds(const std::string& res) {
     return 60;
 }
 
+// MOVED OUTSIDE: Helper to map resolution to Binance interval
+static std::string get_binance_interval(const std::string& res) {
+    if (res == "1m") return "1m";
+    if (res == "3m") return "3m";
+    if (res == "5m") return "5m";
+    if (res == "15m") return "15m";
+    if (res == "30m") return "30m";
+    if (res == "1h") return "1h";
+    if (res == "2h") return "2h";
+    if (res == "4h") return "4h";
+    if (res == "6h") return "6h";
+    if (res == "8h") return "8h";
+    if (res == "12h") return "12h";
+    if (res == "1d") return "1d";
+    if (res == "3d") return "3d";
+    if (res == "1w") return "1w";
+    if (res == "1M") return "1M";
+    return "5m";
+}
+
 namespace backtest {
 
 std::vector<Candle> fetch_candles(
@@ -41,11 +62,15 @@ std::vector<Candle> fetch_candles(
     long long cur = start_time;
     while (cur <= end_time) {
         long long window_end = std::min(end_time, cur + max_window_seconds - 1);
+        
+        // ✅ Use the helper function
+        std::string interval = get_binance_interval(resolution);
         std::ostringstream url;
-        url << "https://api.delta.exchange/v2/history/candles?symbol=" << symbol
-            << "&resolution=" << resolution
-            << "&start=" << cur
-            << "&end=" << window_end
+        url << "https://api.binance.com/api/v3/klines"
+            << "?symbol=" << symbol
+            << "&interval=" << interval
+            << "&startTime=" << (cur * 1000)
+            << "&endTime=" << (window_end * 1000)
             << "&limit=" << limit;
 
         std::cout << "[fetch] " << cur << " -> " << window_end << "  URL: " << url.str() << std::endl;
@@ -67,32 +92,31 @@ std::vector<Candle> fetch_candles(
 
             try {
                 auto response = json::parse(readBuffer);
-                auto result = response.value("result", json::array());
-                if (result.empty()) {
+
+                if (!response.is_array()) {
+                    throw std::runtime_error("Expected top-level JSON array from Binance");
+                }
+
+                if (response.empty()) {
                     cur = window_end + 1;
                     continue;
                 }
 
-                for (const auto& item : result) {
+                for (const auto& item : response) {
+                    if (!item.is_array() || item.size() < 6) continue;
+
                     Candle c;
-                    if (item.is_array()) {
-                        c.time = item[0].get<long long>();
-                        c.open = item[1].get<double>();
-                        c.high = item[2].get<double>();
-                        c.low = item[3].get<double>();
-                        c.close = item[4].get<double>();
-                        c.volume = item[5].get<double>();
-                    } else {
-                        c.time = item.value("time", 0LL);
-                        c.open = item.value("open", 0.0);
-                        c.high = item.value("high", 0.0);
-                        c.low = item.value("low", 0.0);
-                        c.close = item.value("close", 0.0);
-                        c.volume = item.value("volume", 0.0);
-                    }
+                    c.time = item[0].get<long long>() / 1000;
+                    c.open = std::stod(item[1].get<std::string>());
+                    c.high = std::stod(item[2].get<std::string>());
+                    c.low = std::stod(item[3].get<std::string>());
+                    c.close = std::stod(item[4].get<std::string>());
+                    c.volume = std::stod(item[5].get<std::string>());
                     all_data.push_back(c);
                 }
+
             } catch (const std::exception& e) {
+                std::cerr << "Raw API response:\n" << readBuffer << "\n";
                 throw std::runtime_error("JSON parse error: " + std::string(e.what()));
             }
         } else {

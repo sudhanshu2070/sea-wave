@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <ctime>
+#include <cmath>  
 
 namespace backtest {
 

@@ -50,7 +50,7 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
                 if (!reason.empty() && reason.back() != '>') reason += "; ";
                 reason += "span_b (or span_a): need " + std::to_string(span_b_len) + ", have " + std::to_string(available);
             }
-            logs.push_back({
+            logs.push_back(LogEntry{
                 row.brick_time, "skip", reason,
                 c, kijun_val, NAN, NAN,
                 false, false, false, false,
@@ -72,14 +72,14 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
         if (!position) {
             if (long_entry) {
                 position = std::make_unique<Position>(Position{"long", row.brick_time, c});
-                logs.push_back({
+                logs.push_back(LogEntry{
                     row.brick_time, "enter_long", "Renko close > kijun and > cloud_top",
                     c, kijun_val, cloud_top, cloud_bottom,
                     true, false, false, false, "long", available
                 });
             } else if (short_entry) {
                 position = std::make_unique<Position>(Position{"short", row.brick_time, c});
-                logs.push_back({
+                logs.push_back(LogEntry{
                     row.brick_time, "enter_short", "Renko close < kijun and < cloud_bottom",
                     c, kijun_val, cloud_top, cloud_bottom,
                     false, false, true, false, "short", available
@@ -95,7 +95,7 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
                 } else {
                     reason = "No entry: conditions not met";
                 }
-                logs.push_back({
+                logs.push_back(LogEntry{
                     row.brick_time, "no_trade", reason,
                     c, kijun_val, cloud_top, cloud_bottom,
                     long_entry, false, short_entry, false,
@@ -107,14 +107,14 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
                 if (long_exit) {
                     double profit = c - position->entry_price;
                     trades.push_back({position->entry_time, row.brick_time, position->entry_price, c, "long", profit});
-                    logs.push_back({
+                    logs.push_back(LogEntry{
                         row.brick_time, "exit_long", "Renko closed below kijun or below cloud_top",
                         c, kijun_val, cloud_top, cloud_bottom,
                         false, true, false, false, "none", available
                     });
                     position.reset();
                 } else {
-                    logs.push_back({
+                    logs.push_back(LogEntry{
                         row.brick_time, "hold_long", "Exit conditions not met",
                         c, kijun_val, cloud_top, cloud_bottom,
                         false, false, false, false, "long", available
@@ -124,14 +124,14 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
                 if (short_exit) {
                     double profit = position->entry_price - c;
                     trades.push_back({position->entry_time, row.brick_time, position->entry_price, c, "short", profit});
-                    logs.push_back({
+                    logs.push_back(LogEntry{
                         row.brick_time, "exit_short", "Renko closed above kijun or above cloud_bottom",
                         c, kijun_val, cloud_top, cloud_bottom,
                         false, false, false, true, "none", available
                     });
                     position.reset();
                 } else {
-                    logs.push_back({
+                    logs.push_back(LogEntry{
                         row.brick_time, "hold_short", "Exit conditions not met",
                         c, kijun_val, cloud_top, cloud_bottom,
                         false, false, false, false, "short", available
@@ -150,7 +150,7 @@ std::pair<std::vector<Trade>, std::vector<LogEntry>> run_strategy(
 
         double cloud_top = std::max(span_a.back(), span_b.back());
         double cloud_bottom = std::min(span_a.back(), span_b.back());
-        logs.push_back({
+        logs.push_back(LogEntry{
             last.brick_time, "force_exit_" + position->side, "Closed at end of backtest",
             c, kijun.back(), cloud_top, cloud_bottom,
             false, false, false, false, "none", static_cast<int>(ri.size())
