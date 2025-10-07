@@ -176,12 +176,12 @@ vector<Candle> fetch_candles(const string &symbol,const string &resolution,int64
                 });
             }
         }
-                this_thread::sleep_for(chrono::milliseconds(20));
-            }
-            if(all_data.empty()) throw runtime_error("No candles returned. Check symbol/times.");
-            sort(all_data.begin(),all_data.end(),[](const Candle &a,const Candle &b){ return a.time<b.time; });
-            return all_data;
-        }
+        this_thread::sleep_for(chrono::milliseconds(20));
+    }
+    if(all_data.empty()) throw runtime_error("No candles returned. Check symbol/times.");
+    sort(all_data.begin(),all_data.end(),[](const Candle &a,const Candle &b){ return a.time<b.time; });
+    return all_data;
+}
 
 vector<RenkoBrick> build_renko(const vector<Candle> &candles,double brick_size,double reversal_size,const string &source){
     vector<RenkoBrick> rows;
@@ -378,8 +378,19 @@ using namespace Pistache;
 class BacktestHandler {
 public:
     void handleBacktest(const Rest::Request& request, Http::ResponseWriter response) {
+        auto start_time = chrono::steady_clock::now();
+        string client_ip = request.address().host();
+        cout << "🔔 BACKTEST REQUEST RECEIVED from " << client_ip << " at " << get_current_time() << endl;
+        
         try {
             auto data = json::parse(request.body());
+
+            // Log request parameters
+            cout << "📊 Request parameters:" << endl;
+            cout << "   Symbol: " << data.value("symbol", "ETHUSDT") << endl;
+            cout << "   Resolution: " << data.value("resolution", "5m") << endl;
+            cout << "   Date range: " << data.value("start_date", "2023-08-01") << " to " 
+                 << data.value("end_date", "2023-08-02") << endl;
 
             // Extract parameters (with same defaults as original)
             string symbol = data.value("symbol", "ETHUSDT");
@@ -387,27 +398,36 @@ public:
             double brick_size = data.value("brick_size", 40.0);
             double reversal_size = data.value("reversal_size", 80.0);
             string source_type = data.value("source_type", "ohlc4");
-            string start_date = data.value("start_date", "2025-08-01");
-            string start_time = data.value("start_time", "00:00:00");
-            string end_date = data.value("end_date", "2025-09-01");
-            string end_time = data.value("end_time", "23:59:59");
+            string start_date = data.value("start_date", "2023-08-01");
+            string start_time_str = data.value("start_time", "00:00:00");
+            string end_date = data.value("end_date", "2023-08-02");
+            string end_time_str = data.value("end_time", "23:59:59");
             int tenkan = data.value("tenkan", 5);
             int kijun = data.value("kijun", 26);
             int span_b = data.value("span_b", 52);
-            // displacement is hardcoded in ichimoku_on_renko default
 
-            auto start_ts = ist_to_unix(start_date, start_time);
-            auto end_ts = ist_to_unix(end_date, end_time);
+            auto start_ts = ist_to_unix(start_date, start_time_str);
+            auto end_ts = ist_to_unix(end_date, end_time_str);
 
             if (start_ts >= end_ts) {
                 throw runtime_error("Start time must be before end time");
             }
 
-            // 🔁 EXACT SAME FLOW AS strategyinc.cpp main()
+            cout << "⏳ Fetching candles..." << endl;
             auto df = fetch_candles(symbol, resolution, start_ts, end_ts);
+            cout << "✅ Fetched " << df.size() << " candles" << endl;
+
+            cout << "⏳ Building Renko bricks..." << endl;
             auto renko = build_renko(df, brick_size, reversal_size, source_type);
-            auto ri = ichimoku_on_renko(renko, tenkan, kijun, span_b); // uses default displacement=26
+            cout << "✅ Built " << renko.size() << " Renko bricks" << endl;
+
+            cout << "⏳ Calculating Ichimoku..." << endl;
+            auto ri = ichimoku_on_renko(renko, tenkan, kijun, span_b);
+            cout << "✅ Calculated Ichimoku for " << ri.size() << " bricks" << endl;
+
+            cout << "⏳ Running strategy..." << endl;
             auto trades = run_strategy(ri);
+            cout << "✅ Strategy generated " << trades.size() << " trades" << endl;
 
             // Generate CSVs as strings
             string renko_csv = renko_to_csv_string(renko);
@@ -418,12 +438,16 @@ public:
             for (const auto& t : trades) net_profit += t.profit;
             net_profit = round(net_profit * 100.0) / 100.0;
 
+            auto end_time = chrono::steady_clock::now();
+            auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
             json result = {
                 {"success", true},
                 {"summary", {
                     {"renko_bricks", (int)renko.size()},
                     {"trades", (int)trades.size()},
-                    {"net_profit", net_profit}
+                    {"net_profit", net_profit},
+                    {"processing_time_ms", duration.count()}
                 }},
                 {"files", {
                     {"renko_with_ichimoku.csv", renko_csv},
@@ -432,20 +456,44 @@ public:
                 }}
             };
 
+            cout << "✅ Backtest completed in " << duration.count() << "ms - " 
+                 << trades.size() << " trades, Net Profit: " << net_profit << endl;
+
             response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
             response.send(Http::Code::Ok, result.dump(2));
 
         } catch (const exception& e) {
+            auto end_time = chrono::steady_clock::now();
+            auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+            
+            cout << "❌ Backtest failed after " << duration.count() << "ms: " << e.what() << endl;
+            
             json err{{"success", false}, {"error", string("Backtest failed: ") + e.what()}};
             response.send(Http::Code::Bad_Request, err.dump(2));
         }
     }
+
+private:
+    string get_current_time() {
+        auto now = chrono::system_clock::now();
+        auto in_time_t = chrono::system_clock::to_time_t(now);
+        
+        char buf[100];
+        tm tm_buf;
+        localtime_r(&in_time_t, &tm_buf);
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        return string(buf);
+    }
 };
 
 int main() {
+    cout << "🚀 Initializing Backtest API Server..." << endl;
+    
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    cout << "✅ cURL initialized" << endl;
 
-    Address addr(Ipv4::any(), Port(9080));
+    const int PORT = 9080;
+    Address addr(Ipv4::any(), Port(PORT));
     auto opts = Http::Endpoint::options().threads(2);
     Http::Endpoint server(addr);
     server.init(opts);
@@ -455,9 +503,19 @@ int main() {
     router.post("/backtest", Rest::Routes::bind(&BacktestHandler::handleBacktest, &handler));
 
     server.setHandler(router.handler());
-    cout << "🚀 Backtest API running on http://localhost:9080/backtest\n";
+    
+    cout << "==================================================" << endl;
+    cout << "🎯 BACKTEST API SERVER STARTED SUCCESSFULLY!" << endl;
+    cout << "📍 Local: http://localhost:" << PORT << "/backtest" << endl;
+    cout << "📍 Network: http://0.0.0.0:" << PORT << "/backtest" << endl;
+    cout << "📍 EC2/Cloud: http://[your-ip-or-domain]:" << PORT << "/backtest" << endl;
+    cout << "==================================================" << endl;
+    cout << "📝 Ready to accept backtest requests..." << endl;
+    cout << "💡 Use Ctrl+C to stop the server" << endl;
+
     server.serve();
 
+    cout << "🛑 Server shutting down..." << endl;
     curl_global_cleanup();
     return 0;
 }
