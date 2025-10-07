@@ -380,13 +380,13 @@ public:
     void handleBacktest(const Rest::Request& request, Http::ResponseWriter response) {
         auto start_time = chrono::steady_clock::now();
         string client_ip = request.address().host();
-        cout << "🔔 BACKTEST REQUEST RECEIVED from " << client_ip << " at " << get_current_time() << endl;
+        cout << " BACKTEST REQUEST RECEIVED from " << client_ip << " at " << get_current_time() << endl;
         
         try {
             auto data = json::parse(request.body());
 
             // Log request parameters
-            cout << "📊 Request parameters:" << endl;
+            cout << "Request parameters:" << endl;
             cout << "   Symbol: " << data.value("symbol", "ETHUSDT") << endl;
             cout << "   Resolution: " << data.value("resolution", "5m") << endl;
             cout << "   Date range: " << data.value("start_date", "2023-08-01") << " to " 
@@ -413,21 +413,21 @@ public:
                 throw runtime_error("Start time must be before end time");
             }
 
-            cout << "⏳ Fetching candles..." << endl;
+            cout << "Fetching candles..." << endl;
             auto df = fetch_candles(symbol, resolution, start_ts, end_ts);
-            cout << "✅ Fetched " << df.size() << " candles" << endl;
+            cout << " Fetched " << df.size() << " candles" << endl;
 
-            cout << "⏳ Building Renko bricks..." << endl;
+            cout << "Building Renko bricks..." << endl;
             auto renko = build_renko(df, brick_size, reversal_size, source_type);
-            cout << "✅ Built " << renko.size() << " Renko bricks" << endl;
+            cout << "Built " << renko.size() << " Renko bricks" << endl;
 
-            cout << "⏳ Calculating Ichimoku..." << endl;
+            cout << "Calculating Ichimoku..." << endl;
             auto ri = ichimoku_on_renko(renko, tenkan, kijun, span_b);
-            cout << "✅ Calculated Ichimoku for " << ri.size() << " bricks" << endl;
+            cout << "Calculated Ichimoku for " << ri.size() << " bricks" << endl;
 
-            cout << "⏳ Running strategy..." << endl;
+            cout << "Running strategy..." << endl;
             auto trades = run_strategy(ri);
-            cout << "✅ Strategy generated " << trades.size() << " trades" << endl;
+            cout << "Strategy generated " << trades.size() << " trades" << endl;
 
             // Generate CSVs as strings
             string renko_csv = renko_to_csv_string(renko);
@@ -456,7 +456,7 @@ public:
                 }}
             };
 
-            cout << "✅ Backtest completed in " << duration.count() << "ms - " 
+            cout << "Backtest completed in " << duration.count() << "ms - " 
                  << trades.size() << " trades, Net Profit: " << net_profit << endl;
 
             response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
@@ -466,7 +466,7 @@ public:
             auto end_time = chrono::steady_clock::now();
             auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
             
-            cout << "❌ Backtest failed after " << duration.count() << "ms: " << e.what() << endl;
+            cout << "Backtest failed after " << duration.count() << "ms: " << e.what() << endl;
             
             json err{{"success", false}, {"error", string("Backtest failed: ") + e.what()}};
             response.send(Http::Code::Bad_Request, err.dump(2));
@@ -487,10 +487,10 @@ private:
 };
 
 int main() {
-    cout << "🚀 Initializing Backtest API Server..." << endl;
-    
+    cout << "Initializing Backtest API Server..." << endl;
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    cout << "✅ cURL initialized" << endl;
+    cout << "cURL initialized" << endl;
 
     const int PORT = 9080;
     Address addr(Ipv4::any(), Port(PORT));
@@ -499,23 +499,33 @@ int main() {
     server.init(opts);
 
     Rest::Router router;
+
+    // Health endpoint
+    Rest::Routes::Get(router, "/backtest/health",
+        [](const Rest::Request&, Http::ResponseWriter response) -> Rest::Route::Result {
+            nlohmann::json result = {{"status", "ok"}, {"message", "Server is running"}};
+            response.send(Http::Code::Ok, result.dump(), MIME(Application, Json));
+            return Rest::Route::Result::Ok;
+        });
+
+    // Backtest handler
     BacktestHandler handler;
     router.post("/backtest", Rest::Routes::bind(&BacktestHandler::handleBacktest, &handler));
 
     server.setHandler(router.handler());
-    
+
     cout << "==================================================" << endl;
-    cout << "🎯 BACKTEST API SERVER STARTED SUCCESSFULLY!" << endl;
-    cout << "📍 Local: http://localhost:" << PORT << "/backtest" << endl;
-    cout << "📍 Network: http://0.0.0.0:" << PORT << "/backtest" << endl;
-    cout << "📍 EC2/Cloud: http://[your-ip-or-domain]:" << PORT << "/backtest" << endl;
+    cout << "BACKTEST API SERVER STARTED SUCCESSFULLY!" << endl;
+    cout << "Local: http://localhost:" << PORT << "/backtest" << endl;
+    cout << "Network: http://0.0.0.0:" << PORT << "/backtest" << endl;
+    cout << "EC2/Cloud: http://[your-ip-or-domain]:" << PORT << "/backtest" << endl;
     cout << "==================================================" << endl;
-    cout << "📝 Ready to accept backtest requests..." << endl;
-    cout << "💡 Use Ctrl+C to stop the server" << endl;
+    cout << "Ready to accept backtest requests..." << endl;
+    cout << "Use Ctrl+C to stop the server" << endl;
 
     server.serve();
 
-    cout << "🛑 Server shutting down..." << endl;
+    cout << "Server shutting down..." << endl;
     curl_global_cleanup();
     return 0;
 }
