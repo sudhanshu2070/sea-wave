@@ -441,7 +441,7 @@ public:
             auto end_time = chrono::steady_clock::now();
             auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
 
-            // Create ZIP or return CSV data directly
+            // Return all CSV data in JSON response
             json result = {
                 {"success", true},
                 {"summary", {
@@ -450,10 +450,19 @@ public:
                     {"net_profit", net_profit},
                     {"processing_time_ms", duration.count()}
                 }},
-                {"csv_data", {
-                    {"renko_with_ichimoku.csv", renko_csv},
-                    {"trades.csv", trades_csv},
-                    {"backtest_summary.csv", summary_csv}
+                {"csv_files", {
+                    {"renko_data", {
+                        {"filename", "renko_with_ichimoku.csv"},
+                        {"content", renko_csv}
+                    }},
+                    {"trades_data", {
+                        {"filename", "trades.csv"}, 
+                        {"content", trades_csv}
+                    }},
+                    {"summary_data", {
+                        {"filename", "backtest_summary.csv"},
+                        {"content", summary_csv}
+                    }}
                 }}
             };
 
@@ -474,6 +483,7 @@ public:
         }
     }
 
+    // Simple CSV download endpoint - returns JSON with file content
     void handleDownloadCSV(const Rest::Request& request, Http::ResponseWriter response) {
         auto start_time = chrono::steady_clock::now();
         string client_ip = request.address().host();
@@ -495,7 +505,7 @@ public:
             int tenkan = data.value("tenkan", 5);
             int kijun = data.value("kijun", 26);
             int span_b = data.value("span_b", 52);
-            string csv_type = data.value("csv_type", "all"); // all, renko, trades, summary
+            string file_type = data.value("file_type", "all"); // renko, trades, summary, all
 
             auto start_ts = ist_to_unix(start_date, start_time_str);
             auto end_ts = ist_to_unix(end_date, end_time_str);
@@ -504,112 +514,48 @@ public:
                 throw runtime_error("Start time must be before end time");
             }
 
-            cout << "Generating CSV data for download..." << endl;
+            cout << "Generating CSV data for " << file_type << "..." << endl;
             auto df = fetch_candles(symbol, resolution, start_ts, end_ts);
             auto renko = build_renko(df, brick_size, reversal_size, source_type);
             auto ri = ichimoku_on_renko(renko, tenkan, kijun, span_b);
             auto trades = run_strategy(ri);
 
-            // Generate requested CSV
-            string csv_content;
-            string filename;
+            json result = {
+                {"success", true},
+                {"symbol", symbol},
+                {"start_date", start_date},
+                {"end_date", end_date}
+            };
 
-            if (csv_type == "renko") {
-                csv_content = renko_to_csv_string(renko);
-                filename = "renko_data_" + symbol + "_" + start_date + "_to_" + end_date + ".csv";
-            } else if (csv_type == "trades") {
-                csv_content = trades_to_csv_string(trades);
-                filename = "trades_data_" + symbol + "_" + start_date + "_to_" + end_date + ".csv";
-            } else if (csv_type == "summary") {
-                csv_content = summary_to_csv_string(trades);
-                filename = "summary_" + symbol + "_" + start_date + "_to_" + end_date + ".csv";
-            } else {
-                // Return all CSVs as JSON
-                json result = {
-                    {"success", true},
-                    {"files", {
-                        {"renko_with_ichimoku.csv", renko_to_csv_string(renko)},
-                        {"trades.csv", trades_to_csv_string(trades)},
-                        {"backtest_summary.csv", summary_to_csv_string(trades)}
-                    }}
+            if (file_type == "renko" || file_type == "all") {
+                result["renko_data"] = {
+                    {"filename", "renko_" + symbol + "_" + start_date + "_to_" + end_date + ".csv"},
+                    {"content", renko_to_csv_string(renko)}
                 };
-                response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
-                response.send(Http::Code::Ok, result.dump(2));
-                return;
             }
 
-            // Set headers for file download
-            response.headers()
-                .add<Http::Header::ContentType>(MIME(Text, Csv))
-                .add<Http::Header::ContentDisposition>({"attachment", filename});
+            if (file_type == "trades" || file_type == "all") {
+                result["trades_data"] = {
+                    {"filename", "trades_" + symbol + "_" + start_date + "_to_" + end_date + ".csv"},
+                    {"content", trades_to_csv_string(trades)}
+                };
+            }
 
-            response.send(Http::Code::Ok, csv_content);
-            cout << "CSV file sent: " << filename << " (" << csv_content.size() << " bytes)" << endl;
+            if (file_type == "summary" || file_type == "all") {
+                result["summary_data"] = {
+                    {"filename", "summary_" + symbol + "_" + start_date + "_to_" + end_date + ".csv"},
+                    {"content", summary_to_csv_string(trades)}
+                };
+            }
+
+            response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
+            response.send(Http::Code::Ok, result.dump(2));
+
+            cout << "CSV data sent for " << file_type << " - " << renko.size() << " bricks, " << trades.size() << " trades" << endl;
 
         } catch (const exception& e) {
             cout << "CSV download failed: " << e.what() << endl;
             json err{{"success", false}, {"error", string("CSV download failed: ") + e.what()}};
-            response.send(Http::Code::Bad_Request, err.dump(2));
-        }
-    }
-
-    void handleDownloadAllCSV(const Rest::Request& request, Http::ResponseWriter response) {
-        auto start_time = chrono::steady_clock::now();
-        string client_ip = request.address().host();
-        cout << " ALL CSV DOWNLOAD REQUEST from " << client_ip << " at " << get_current_time() << endl;
-        
-        try {
-            auto data = json::parse(request.body());
-
-            // Extract parameters
-            string symbol = data.value("symbol", "ETHUSDT");
-            string resolution = data.value("resolution", "5m");
-            double brick_size = data.value("brick_size", 40.0);
-            double reversal_size = data.value("reversal_size", 80.0);
-            string source_type = data.value("source_type", "ohlc4");
-            string start_date = data.value("start_date", "2023-08-01");
-            string start_time_str = data.value("start_time", "00:00:00");
-            string end_date = data.value("end_date", "2023-08-02");
-            string end_time_str = data.value("end_time", "23:59:59");
-            int tenkan = data.value("tenkan", 5);
-            int kijun = data.value("kijun", 26);
-            int span_b = data.value("span_b", 52);
-
-            auto start_ts = ist_to_unix(start_date, start_time_str);
-            auto end_ts = ist_to_unix(end_date, end_time_str);
-
-            if (start_ts >= end_ts) {
-                throw runtime_error("Start time must be before end time");
-            }
-
-            cout << "Generating all CSV files for download..." << endl;
-            auto df = fetch_candles(symbol, resolution, start_ts, end_ts);
-            auto renko = build_renko(df, brick_size, reversal_size, source_type);
-            auto ri = ichimoku_on_renko(renko, tenkan, kijun, span_b);
-            auto trades = run_strategy(ri);
-
-            // Create a combined response with all CSV data
-            json result = {
-                {"success", true},
-                {"summary", {
-                    {"renko_bricks", (int)renko.size()},
-                    {"trades", (int)trades.size()}
-                }},
-                {"files", {
-                    {"renko_with_ichimoku.csv", renko_to_csv_string(renko)},
-                    {"trades.csv", trades_to_csv_string(trades)},
-                    {"backtest_summary.csv", summary_to_csv_string(trades)}
-                }}
-            };
-
-            response.headers().add<Http::Header::ContentType>(MIME(Application, Json));
-            response.send(Http::Code::Ok, result.dump(2));
-            
-            cout << "All CSV data sent for " << symbol << " (" << renko.size() << " bricks, " << trades.size() << " trades)" << endl;
-
-        } catch (const exception& e) {
-            cout << "All CSV download failed: " << e.what() << endl;
-            json err{{"success", false}, {"error", string("All CSV download failed: ") + e.what()}};
             response.send(Http::Code::Bad_Request, err.dump(2));
         }
     }
@@ -655,21 +601,17 @@ int main() {
     // Regular backtest (returns JSON with CSV data as strings)
     router.post("/backtest", Rest::Routes::bind(&BacktestHandler::handleBacktest, &handler));
     
-    // Download specific CSV file (returns actual CSV file for download)
+    // CSV download endpoint (returns JSON with CSV content)
     router.post("/backtest/download-csv", Rest::Routes::bind(&BacktestHandler::handleDownloadCSV, &handler));
-    
-    // Download all CSV data (returns JSON with all CSV content)
-    router.post("/backtest/download-all-csv", Rest::Routes::bind(&BacktestHandler::handleDownloadAllCSV, &handler));
 
     server.setHandler(router.handler());
 
     cout << "==================================================" << endl;
     cout << "BACKTEST API SERVER STARTED!" << endl;
     cout << "Endpoints:" << endl;
-    cout << "  POST /backtest           - Run backtest, returns JSON with CSV data" << endl;
-    cout << "  POST /backtest/download-csv - Download specific CSV file" << endl;
-    cout << "  POST /backtest/download-all-csv - Get all CSV data as JSON" << endl;
-    cout << "  GET  /backtest/health    - Health check" << endl;
+    cout << "  POST /backtest              - Run backtest, returns JSON with CSV data" << endl;
+    cout << "  POST /backtest/download-csv  - Get CSV data as JSON (specify file_type)" << endl;
+    cout << "  GET  /backtest/health       - Health check" << endl;
     cout << "==================================================" << endl;
     cout << "Server running on port " << PORT << endl;
     cout << "Ready to accept requests..." << endl;
